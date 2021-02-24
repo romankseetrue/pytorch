@@ -2,6 +2,7 @@
 
 #include <ATen/core/functional.h>
 #include <ATen/core/ivalue.h>
+#include <c10/util/Optional.h>
 #include <torch/csrc/jit/api/method.h>
 
 namespace torch {
@@ -33,6 +34,12 @@ struct TORCH_API Object {
   c10::ClassTypePtr type() const {
     return _ivalue()->type();
   }
+
+  struct ObjectProperty {
+    std::string name;
+    Method getter_func;
+    c10::optional<Method> setter_func;
+  };
 
   void setattr(const std::string& name, c10::IValue v) {
     if (_ivalue()->type()->hasConstant(name)) {
@@ -100,6 +107,39 @@ struct TORCH_API Object {
     return c10::fmap(type()->methods(), [&](Function* func) {
       return Method(_ivalue(), func);
     });
+  }
+
+  // Used as a utility function to find a property
+  const std::vector<ObjectProperty> get_properties() const {
+    return c10::fmap(
+        type()->properties(), [&](const ClassType::Property& prop) {
+          c10::optional<Method> setter = c10::nullopt;
+          if (prop.setter) {
+            setter = Method(_ivalue(), prop.setter);
+          }
+          return ObjectProperty{
+              prop.name, Method(_ivalue(), prop.getter), setter};
+        });
+  }
+
+  bool has_property(const std::string& name) const {
+    auto props = get_properties();
+    for (auto prop : props) {
+      if (prop.name == name) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  const ObjectProperty get_property(const std::string& name) const {
+    auto props = get_properties();
+    for (auto prop : props) {
+      if (prop.name == name) {
+        return prop;
+      }
+    }
+    AT_ERROR("Property '", name, "' is not defined.");
   }
 
   c10::optional<Method> find_method(const std::string& basename) const;
